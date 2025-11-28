@@ -5,7 +5,7 @@ import os
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def home():
     return render_template('index.html')
 
@@ -14,9 +14,9 @@ def get_transcript_api():
     try:
         url = request.args.get('url')
         if not url:
-            return jsonify({"error": "URL nahi mila (Missing)"}), 400
+            return jsonify({"error": "URL nahi mila"}), 400
 
-        # --- Video ID nikalne ka Logic ---
+        # Video ID nikalna
         video_id = None
         if "youtu.be" in url:
             video_id = url.split("youtu.be/")[1].split("?")[0]
@@ -30,41 +30,39 @@ def get_transcript_api():
         if not video_id:
             return jsonify({"error": "Video ID detect nahi hui."}), 400
 
-        # --- ? COOKIES SETUP (Render ke liye) ---
+        # --- ✅ COOKIE CHECK ---
         cookie_file = "cookies.txt"
         
-        # Check karein ki cookies.txt server par hai ya nahi
-        cookies_path = cookie_file if os.path.exists(cookie_file) else None
-        
-        # Agar cookies file nahi mili to warning print karega (Console me)
-        if not cookies_path:
-            print("? Warning: cookies.txt nahi mili! YouTube block kar sakta hai.")
+        # Check karein ki file server par exist karti hai ya nahi
+        if os.path.exists(cookie_file):
+            print(f"✅ Success: '{cookie_file}' server par mil gayi!")
+            cookies_path = cookie_file
+        else:
+            print(f"❌ Error: '{cookie_file}' server par nahi mili!")
+            cookies_path = None
+            return jsonify({"error": "Server Error: cookies.txt file gayab hai!"}), 500
 
-        # --- Transcript Fetching ---
+        # --- TRANSCRIPT FETCHING ---
         try:
-            # Standard function use kar rahe hain jo cookies support karta hai
+            # Hum seedha get_transcript use karenge (Backup wala hataya taaki asli error dikhe)
             transcript_list = YouTubeTranscriptApi.get_transcript(
                 video_id, 
-                languages=['hi', 'en-IN', 'en'], 
+                languages=['hi', 'en', 'en-IN'], 
                 cookies=cookies_path
             )
-        except Exception:
-            # Agar direct fetch fail ho, to list_transcripts try karein
-            transcript_list = YouTubeTranscriptApi.list_transcripts(
-                video_id, 
-                cookies=cookies_path
-            ).find_transcript(['hi', 'en-IN', 'en']).fetch()
+            
+            # Text join karna
+            full_text = " ".join([item['text'] for item in transcript_list])
+            return jsonify({"transcript": full_text})
 
-        # --- Text Extract Karna ---
-        # Note: Render par latest library install hogi, jo Dictionary return karti hai.
-        # Isliye hum item['text'] use kar rahe hain.
-        full_text = " ".join([item['text'] for item in transcript_list])
-
-        return jsonify({"transcript": full_text})
+        except Exception as yt_error:
+            # Yahan hume asli error pata chalega
+            print(f"YouTube API Error: {str(yt_error)}")
+            return jsonify({"error": f"YouTube ne roka: {str(yt_error)}"}), 500
 
     except Exception as e:
         print(traceback.format_exc())
-        return jsonify({"error": f"Error: {str(e)}"}), 500
+        return jsonify({"error": f"System Error: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
