@@ -1,150 +1,127 @@
-from flask import Flask, request, render_template_string
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
-import re
+from typing import Optional, Iterable
 
-# FIX: Double underscore correct kiya hai (_name_)
-app = Flask(__name__)
+from requests import Session
+from requests.adapters import HTTPAdapter
+from urllib3 import Retry
 
-# Aapki di hui API Key ko yahan Secure Key bana diya hai
-app.secret_key = "6929ca86c8b7375deae07c5c"
+from .proxies import ProxyConfig
 
-# HTML Template
-HTML = '''
-<!DOCTYPE html>
-<html lang="hi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube to Transcript (हिंदी + English)</title>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-align: center; padding: 50px; }
-        h1 { font-size: 3rem; margin-bottom: 10px; }
-        p { font-size: 1.3rem; }
-        input { padding: 15px; width: 70%; max-width: 600px; font-size: 1.1rem; border-radius: 10px; border: none; margin: 20px 0; }
-        button { padding: 15px 40px; font-size: 1.2rem; background: #ff4757; color: white; border: none; border-radius: 10px; cursor: pointer; }
-        button:hover { background: #ff3742; }
-        .result { margin-top: 40px; background: rgba(0,0,0,0.3); padding: 30px; border-radius: 15px; text-align: left; display: inline-block; width: 80%; max-width: 800px; }
-        textarea { width: 100%; height: 400px; background: #222; color: #0f0; padding: 20px; border-radius: 10px; font-size: 1.1rem; margin-top: 20px; }
-        .footer { margin-top: 50px; font-size: 0.9rem; opacity: 0.8; }
-    </style>
-</head>
-<body>
-    <h1>YouTube to Transcript</h1>
-    <p>कोई भी यूट्यूब वीडियो का लिंक डालो – हिंदी, इंग्लिश या कोई भी भाषा में ट्रांसक्रिप्ट मिलेगा</p>
-     
-    <form method="POST">
-        <input type="text" name="url" placeholder="https://youtu.be/..." required>
-        <br>
-        <button type="submit">ट्रांसक्रिप्ट निकालो</button>
-    </form>
+from ._transcripts import TranscriptListFetcher, FetchedTranscript, TranscriptList
 
-    {% if transcript %}
-    <div class="result">
-        <h2>ट्रांसक्रिप्ट मिल गया!</h2>
-        <p><strong>भाषा:</strong> {{ language }}</p>
-        <p><strong>वीडियो ID:</strong> {{ video_id }}</p>
-        <textarea readonly>{{ transcript }}</textarea>
-        <p>Copy कर लो ↑</p>
-    </div>
-    {% endif %}
 
-    {% if error %}
-    <div class="result" style="background: rgba(255,0,0,0.3);">
-        <h2>{{ error }}</h2>
-    </div>
-    {% endif %}
+class YouTubeTranscriptApi:
+    def __init__(
+        self,
+        proxy_config: Optional[ProxyConfig] = None,
+        http_client: Optional[Session] = None,
+    ):
+        """
+        Note on thread-safety: As this class will initialize a `requests.Session`
+        object, it is not thread-safe. Make sure to initialize an instance of
+        `YouTubeTranscriptApi` per thread, if used in a multi-threading scenario!
 
-    <div class="footer">
-        Made with ❤ by Sushil Dahiya | Free Forever
-    </div>
-</body>
-</html>
-'''
+        :param proxy_config: an optional ProxyConfig object, defining proxies used for
+            all network requests. This can be used to work around your IP being blocked
+            by YouTube, as described in the "Working around IP bans" section of the
+            README
+            (https://github.com/jdepoix/youtube-transcript-api?tab=readme-ov-file#working-around-ip-bans-requestblocked-or-ipblocked-exception)
+        :param http_client: You can optionally pass in a requests.Session object, if you
+            manually want to share cookies between different instances of
+            `YouTubeTranscriptApi`, overwrite defaults, specify SSL certificates, etc.
+        """
+        http_client = Session() if http_client is None else http_client
+        http_client.headers.update({"Accept-Language": "en-US"})
+        # Cookie auth has been temporarily disabled, as it is not working properly with
+        # YouTube's most recent changes.
+        # if cookie_path is not None:
+        #     http_client.cookies = _load_cookie_jar(cookie_path)
+        if proxy_config is not None:
+            http_client.proxies = proxy_config.to_requests_dict()
+            if proxy_config.prevent_keeping_connections_alive:
+                http_client.headers.update({"Connection": "close"})
+            if proxy_config.retries_when_blocked > 0:
+                retry_config = Retry(
+                    total=proxy_config.retries_when_blocked,
+                    status_forcelist=[429],
+                )
+                http_client.mount("http://", HTTPAdapter(max_retries=retry_config))
+                http_client.mount("https://", HTTPAdapter(max_retries=retry_config))
+        self._fetcher = TranscriptListFetcher(http_client, proxy_config=proxy_config)
 
-def extract_video_id(url):
-    if not url or not isinstance(url, str):
-        return None
-    # Improved Regex for better matching
-    regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|)|youtu\.be\/)([a-zA-Z0-9_-]{11})"
-    match = re.search(regex, url)
-    return match.group(1) if match else None
+    def fetch(
+        self,
+        video_id: str,
+        languages: Iterable[str] = ("en",),
+        preserve_formatting: bool = False,
+    ) -> FetchedTranscript:
+        """
+        Retrieves the transcript for a single video. This is just a shortcut for
+        calling:
+        `YouTubeTranscriptApi().list(video_id).find_transcript(languages).fetch(preserve_formatting=preserve_formatting)`
 
-def get_transcript(video_id):
-    try:
-        # Koshish 1: Naya Tarika (Advanced - list_transcripts)
-        # Ye tabhi chalega agar library updated hai
-        try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        :param video_id: the ID of the video you want to retrieve the transcript for.
+            Make sure that this is the actual ID, NOT the full URL to the video!
+        :param languages: A list of language codes in a descending priority. For
+            example, if this is set to ["de", "en"] it will first try to fetch the
+            german transcript (de) and then fetch the english transcript (en) if
+            it fails to do so. This defaults to ["en"].
+        :param preserve_formatting: whether to keep select HTML text formatting
+        """
+        return (
+            self.list(video_id)
+            .find_transcript(languages)
+            .fetch(preserve_formatting=preserve_formatting)
+        )
 
-            # Priority: Manual Hindi -> Manual English
-            for lang in ['hi', 'en']:
-                try:
-                    t = transcript_list.find_manually_created_transcript([lang])
-                    texts = [item['text'] for item in t.fetch()]
-                    return " ".join(texts).replace("  ", "\n"), f"{t.language} (Manual)"
-                except: pass
+    def list(
+        self,
+        video_id: str,
+    ) -> TranscriptList:
+        """
+        Retrieves the list of transcripts which are available for a given video. It
+        returns a `TranscriptList` object which is iterable and provides methods to
+        filter the list of transcripts for specific languages. While iterating over
+        the `TranscriptList` the individual transcripts are represented by
+        `Transcript` objects, which provide metadata and can either be fetched by
+        calling `transcript.fetch()` or translated by calling `transcript.translate(
+        'en')`. Example:
 
-            # Priority: Auto Hindi -> Auto English
-            for lang in ['hi', 'en']:
-                try:
-                    t = transcript_list.find_generated_transcript([lang])
-                    texts = [item['text'] for item in t.fetch()]
-                    return " ".join(texts).replace("  ", "\n"), f"{t.language} (Auto)"
-                except: pass
+        ```
+        ytt_api = YouTubeTranscriptApi()
 
-            # Fallback: First available
-            t = next(iter(transcript_list))
-            texts = [item['text'] for item in t.fetch()]
-            typ = "Auto" if t.is_generated else "Manual"
-            return " ".join(texts).replace("  ", "\n"), f"{t.language} ({typ})"
+        # retrieve the available transcripts
+        transcript_list = ytt_api.list('video_id')
 
-        except AttributeError:
-            # Koshish 2: Purana Tarika (Agar 'list_transcripts' error de raha hai)
-            print("Falling back to old method...")
-            data = YouTubeTranscriptApi.get_transcript(video_id, languages=['hi', 'en'])
-            
-            # Simple Text formatting
-            formatter = TextFormatter()
-            formatted_text = formatter.format_transcript(data)
-            return formatted_text, "Hindi/English (Old Lib)"
+        # iterate over all available transcripts
+        for transcript in transcript_list:
+            # the Transcript object provides metadata properties
+            print(
+                transcript.video_id,
+                transcript.language,
+                transcript.language_code,
+                # whether it has been manually created or generated by YouTube
+                transcript.is_generated,
+                # a list of languages the transcript can be translated to
+                transcript.translation_languages,
+            )
 
-    except Exception as e:
-        return None, str(e)
+            # fetch the actual transcript data
+            print(transcript.fetch())
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    transcript = None
-    language = None
-    video_id = None
-    error = None
+            # translating the transcript will return another transcript object
+            print(transcript.translate('en').fetch())
 
-    if request.method == "POST":
-        url = request.form.get("url")
-        
-        if not url:
-            error = "कृपया यूट्यूब लिंक डालें।"
-        else:
-            video_id = extract_video_id(url)
-            if not video_id:
-                error = "गलत यूट्यूब लिंक डाला है भाई"
-            else:
-                transcript, error_or_language = get_transcript(video_id)
-                
-                if transcript:
-                    language = error_or_language
-                else:
-                    if "No transcripts were found" in error_or_language:
-                        error = "इस वीडियो में ट्रांसक्रिप्ट नहीं है।"
-                    elif "is a private video" in error_or_language:
-                        error = "यह वीडियो प्राइवेट है।"
-                    elif "disabled" in error_or_language:
-                        error = "इस वीडियो के लिए ट्रांसक्रिप्ट अक्षम (disabled) है।"
-                    else:
-                        error = f"Error: {error_or_language}"
+        # you can also directly filter for the language you are looking for, using the transcript list
+        transcript = transcript_list.find_transcript(['de', 'en'])
 
-    return render_template_string(HTML, transcript=transcript, language=language, video_id=video_id, error=error)
+        # or just filter for manually created transcripts
+        transcript = transcript_list.find_manually_created_transcript(['de', 'en'])
 
-# FIX: Double underscore correct kiya hai (_name, __main_)
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+        # or automatically generated ones
+        transcript = transcript_list.find_generated_transcript(['de', 'en'])
+        ```
+
+        :param video_id: the ID of the video you want to retrieve the transcript for.
+            Make sure that this is the actual ID, NOT the full URL to the video!
+        """
+        return self._fetcher.fetch(video_id)
