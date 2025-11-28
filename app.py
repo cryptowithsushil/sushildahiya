@@ -96,7 +96,8 @@ def get_transcript(video_id):
             typ = "Auto" if t.is_generated else "Manual"
             return " ".join(texts).replace("  ", "\n"), f"{t.language} ({typ})"
 
-        except AttributeError:
+        except AttributeError as e
+             generated transcript (e)
             # Koshish 2: Purana Tarika (Agar 'list_transcripts' error de raha hai)
             # Ye code crash hone se bachayega
             print("Falling back to old method...")
@@ -146,3 +147,4 @@ def index():
 # FIX: Yahan bhi double underscore () hona chahiye
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+
