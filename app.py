@@ -58,6 +58,10 @@ HTML = '''
 '''
 
 def extract_video_id(url):
+    # FIX: Added check for None or non-string input to prevent TypeError in re.search
+    if not url or not isinstance(url, str):
+        return None
+    
     regex = r"(?:v=|\/|embed\/|youtu\.be\/|\/v\/|\/e\/|watch\?v=)([0-9A-Za-z_-]{11})"
     match = re.search(regex, url)
     return match.group(1) if match else None
@@ -71,7 +75,8 @@ def get_transcript(video_id):
             try:
                 t = transcript_list.find_manually_created_transcript([lang])
                 texts = [item['text'] for item in t.fetch()]
-                return " ".join(texts).replace("  ", " , "\n"), f"{t.language} (Manual)"
+                # FIX: Removed " , " for cleaner formatting
+                return " ".join(texts).replace("  ", "\n"), f"{t.language} (Manual)"
             except: pass
 
         for lang in ['hi', 'en']:
@@ -81,12 +86,14 @@ def get_transcript(video_id):
                 return " ".join(texts).replace("  ", "\n"), f"{t.language} (Auto)"
             except: pass
 
+        # Fallback to the first available transcript
         t = next(iter(transcript_list))
         texts = [item['text'] for item in t.fetch()]
         typ = "Auto" if t.is_generated else "Manual"
         return " ".join(texts).replace("  ", "\n"), f"{t.language} ({typ})"
 
     except Exception as e:
+        # Return None for transcript and the error message for handling in the route
         return None, str(e)
 
 @app.route("/", methods=["GET", "POST"])
@@ -98,13 +105,30 @@ def index():
 
     if request.method == "POST":
         url = request.form.get("url")
-        video_id = extract_video_id(url)
-        if not video_id:
-            error = "गलत यूट्यूब लिंक डाला है भाई"
+        
+        # FIX: Added check for empty URL submission
+        if not url:
+            error = "कृपया यूट्यूब लिंक डालें।"
         else:
-            transcript, language = get_transcript(video_id)
-            if not transcript:
-                error = "इस वीडियो में ट्रांसक्रिप्ट नहीं है या प्राइवेट है।"
+            video_id = extract_video_id(url)
+            if not video_id:
+                error = "गलत यूट्यूब लिंक डाला है भाई"
+            else:
+                transcript, error_or_language = get_transcript(video_id)
+                
+                if transcript:
+                    language = error_or_language
+                else:
+                    # FIX: Improved error handling logic to provide more specific user-friendly messages
+                    if "No transcripts were found" in error_or_language:
+                        error = "इस वीडियो में ट्रांसक्रिप्ट नहीं है।"
+                    elif "is a private video" in error_or_language:
+                        error = "यह वीडियो प्राइवेट है।"
+                    elif "disabled" in error_or_language:
+                        error = "इस वीडियो के लिए ट्रांसक्रिप्ट अक्षम (disabled) है।"
+                    else:
+                        # Fallback for other errors, providing the original error message for debugging
+                        error = f"ट्रांसक्रिप्ट प्राप्त करने में एक अज्ञात त्रुटि हुई: {error_or_language}"
 
     return render_template_string(HTML, transcript=transcript, language=language, video_id=video_id, error=error)
 
