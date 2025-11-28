@@ -1,126 +1,36 @@
-from typing import Optional, Iterable
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
-from requests import Session
-from requests.adapters import HTTPAdapter
-from urllib3 import Retry
+video_id = 'pxiP-HJLCx0'
 
-from ._transcripts import TranscriptListFetcher, FetchedTranscript, TranscriptList
+try:
+    # 1. Transcript List प्राप्त करें
+    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
+    # 2. English transcript ढूंढें (चाहे Manual हो या Auto-generated)
+    # यह सबसे पहले Manual ढूंढेगा, नहीं मिला तो Auto-generated लेगा
+    transcript = transcript_list.find_transcript(['en'])
+    
+    # Transcript data fetch करें
+    transcript_data = transcript.fetch()
 
-class YouTubeTranscriptApi:
-    def __init__(
-        self,
-        proxy_config: Optional[ProxyConfig] = None,
-        http_client: Optional[Session] = None,
-    ):
-        """
-        Note on thread-safety: As this class will initialize a `requests.Session`
-        object, it is not thread-safe. Make sure to initialize an instance of
-        `YouTubeTranscriptApi` per thread, if used in a multi-threading scenario!
+    print(f"Transcript found in language: {transcript.language}")
 
-        :param proxy_config: an optional ProxyConfig object, defining proxies used for
-            all network requests. This can be used to work around your IP being blocked
-            by YouTube, as described in the "Working around IP bans" section of the
-            README
-            (https://github.com/jdepoix/youtube-transcript-api?tab=readme-ov-file#working-around-ip-bans-requestblocked-or-ipblocked-exception)
-        :param http_client: You can optionally pass in a requests.Session object, if you
-            manually want to share cookies between different instances of
-            `YouTubeTranscriptApi`, overwrite defaults, specify SSL certificates, etc.
-        """
-        http_client = Session() if http_client is None else http_client
-        http_client.headers.update({"Accept-Language": "en-US"})
-        # Cookie auth has been temporarily disabled, as it is not working properly with
-        # YouTube's most recent changes.
-        # if cookie_path is not None:
-        #     http_client.cookies = _load_cookie_jar(cookie_path)
-        if proxy_config is not None:
-            http_client.proxies = proxy_config.to_requests_dict()
-            if proxy_config.prevent_keeping_connections_alive:
-                http_client.headers.update({"Connection": "close"})
-            if proxy_config.retries_when_blocked > 0:
-                retry_config = Retry(
-                    total=proxy_config.retries_when_blocked,
-                    status_forcelist=[429],
-                )
-                http_client.mount("http://", HTTPAdapter(max_retries=retry_config))
-                http_client.mount("https://", HTTPAdapter(max_retries=retry_config))
-        self._fetcher = TranscriptListFetcher(http_client, proxy_config=proxy_config)
+    # 3. फाइल में सेव करें (सिर्फ टेक्स्ट)
+    with open("subtitles.txt", "w", encoding="utf-8") as f:
+        for line in transcript_data:
+            # line एक dictionary है: {'text': '...', 'start': ..., 'duration': ...}
+            
+            # सिर्फ टेक्स्ट सेव करने के लिए:
+            f.write(f"{line['text']}\n") 
+            
+            # अगर Time के साथ सेव करना है तो नीचे वाली लाइन use करें:
+            # f.write(f"{line['start']} - {line['text']}\n")
 
-    def fetch(
-        self,
-        video_id: str,
-        languages: Iterable[str] = ("en",),
-        preserve_formatting: bool = False,
-    ) -> FetchedTranscript:
-        """
-        Retrieves the transcript for a single video. This is just a shortcut for
-        calling:
-        `YouTubeTranscriptApi().list(video_id).find_transcript(languages).fetch(preserve_formatting=preserve_formatting)`
+    print("File 'subtitles.txt' saved successfully.")
 
-        :param video_id: the ID of the video you want to retrieve the transcript for.
-            Make sure that this is the actual ID, NOT the full URL to the video!
-        :param languages: A list of language codes in a descending priority. For
-            example, if this is set to ["de", "en"] it will first try to fetch the
-            german transcript (de) and then fetch the english transcript (en) if
-            it fails to do so. This defaults to ["en"].
-        :param preserve_formatting: whether to keep select HTML text formatting
-        """
-        return (
-            self.list(video_id)
-            .find_transcript(languages)
-            .fetch(preserve_formatting=preserve_formatting)
-        )
-
-    def list(
-        self,
-        video_id: str,
-    ) -> TranscriptList:
-        """
-        Retrieves the list of transcripts which are available for a given video. It
-        returns a `TranscriptList` object which is iterable and provides methods to
-        filter the list of transcripts for specific languages. While iterating over
-        the `TranscriptList` the individual transcripts are represented by
-        `Transcript` objects, which provide metadata and can either be fetched by
-        calling `transcript.fetch()` or translated by calling `transcript.translate(
-        'en')`. Example:
-
-        ```
-        ytt_api = YouTubeTranscriptApi()
-
-        # retrieve the available transcripts
-        transcript_list = ytt_api.list('video_id')
-
-        # iterate over all available transcripts
-        for transcript in transcript_list:
-            # the Transcript object provides metadata properties
-            print(
-                transcript.video_id,
-                transcript.language,
-                transcript.language_code,
-                # whether it has been manually created or generated by YouTube
-                transcript.is_generated,
-                # a list of languages the transcript can be translated to
-                transcript.translation_languages,
-            )
-
-            # fetch the actual transcript data
-            print(transcript.fetch())
-
-            # translating the transcript will return another transcript object
-            print(transcript.translate('en').fetch())
-
-        # you can also directly filter for the language you are looking for, using the transcript list
-        transcript = transcript_list.find_transcript(['de', 'en'])
-
-        # or just filter for manually created transcripts
-        transcript = transcript_list.find_manually_created_transcript(['de', 'en'])
-
-        # or automatically generated ones
-        transcript = transcript_list.find_generated_transcript(['de', 'en'])
-        ```
-
-        :param video_id: the ID of the video you want to retrieve the transcript for.
-            Make sure that this is the actual ID, NOT the full URL to the video!
-        """
-        return self._fetcher.fetch(video_id)
-
+except NoTranscriptFound:
+    print("Error: इस वीडियो के लिए English subtitles उपलब्ध नहीं हैं।")
+except TranscriptsDisabled:
+    print("Error: इस वीडियो पर Subtitles बंद (disabled) हैं।")
+except Exception as e:
+    print(f"कोई अन्य गड़बड़ी हुई: {e}")
