@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 from youtube_transcript_api import YouTubeTranscriptApi
 import re
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # यूट्यूब video_id निकालने के लिए
 def extract_video_id(url):
@@ -102,5 +102,6 @@ def transcript():
     })
 
 # चलाओ
-if _name_ == '_main_':
+if __name__ == '__main__':
     app.run(debug=True)
+
