@@ -1,36 +1,47 @@
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+def get_transcript(video_id, target_language='en'):
+    try:
+        # 1. Available Transcripts की list निकालें
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        # 2. Logic: सबसे पहले manually created ढूंढें, नहीं तो generated
+        # हम सीधे target language नहीं ढूंढ रहे, हम "best available" ढूंढ रहे हैं
+        try:
+            # कोशिश करें कि user की मांगी हुई भाषा में direct मिल जाए
+            transcript_obj = transcript_list.find_transcript([target_language])
+            final_transcript = transcript_obj.fetch()
+        except NoTranscriptFound:
+            # अगर direct नहीं मिली, तो कोई भी available transcript लें
+            # (Manually created को प्राथमिकता दें)
+            try:
+                transcript_obj = transcript_list.find_manually_created_transcript()
+            except:
+                # अगर manual नहीं है, तो auto-generated लें
+                transcript_obj = list(transcript_list)[0] 
+            
+            # 3. अब उसे Target Language में Translate करें
+            if transcript_obj.language_code != target_language:
+                try:
+                    final_transcript = transcript_obj.translate(target_language).fetch()
+                except Exception as e:
+                    # अगर translation fail हो जाए (rare case), तो original ही दे दें
+                    final_transcript = transcript_obj.fetch()
+            else:
+                final_transcript = transcript_obj.fetch()
 
-video_id = 'pxiP-HJLCx0'
-
-try:
-    # 1. Transcript List प्राप्त करें
-    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-
-    # 2. English transcript ढूंढें (चाहे Manual हो या Auto-generated)
-    # यह सबसे पहले Manual ढूंढेगा, नहीं मिला तो Auto-generated लेगा
-    transcript = transcript_list.find_transcript(['en'])
+        # Format transcript
+        formatted_transcript = '\n'.join([item['text'] for item in final_transcript])
+        
+        return {
+            'success': True,
+            'transcript': formatted_transcript,
+            'segments': final_transcript,
+            'video_id': video_id,
+            'segment_count': len(final_transcript),
+            'detected_language': transcript_obj.language_code  # यह भी return करना अच्छा है
+        }
     
-    # Transcript data fetch करें
-    transcript_data = transcript.fetch()
-
-    print(f"Transcript found in language: {transcript.language}")
-
-    # 3. फाइल में सेव करें (सिर्फ टेक्स्ट)
-    with open("subtitles.txt", "w", encoding="utf-8") as f:
-        for line in transcript_data:
-            # line एक dictionary है: {'text': '...', 'start': ..., 'duration': ...}
-            
-            # सिर्फ टेक्स्ट सेव करने के लिए:
-            f.write(f"{line['text']}\n") 
-            
-            # अगर Time के साथ सेव करना है तो नीचे वाली लाइन use करें:
-            # f.write(f"{line['start']} - {line['text']}\n")
-
-    print("File 'subtitles.txt' saved successfully.")
-
-except NoTranscriptFound:
-    print("Error: इस वीडियो के लिए English subtitles उपलब्ध नहीं हैं।")
-except TranscriptsDisabled:
-    print("Error: इस वीडियो पर Subtitles बंद (disabled) हैं।")
-except Exception as e:
-    print(f"कोई अन्य गड़बड़ी हुई: {e}")
+    except TranscriptsDisabled:
+        return {'success': False, 'error': 'Transcripts are disabled for this video'}
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        return {'success': False, 'error': f'Error fetching transcript: {str(e)}'}
