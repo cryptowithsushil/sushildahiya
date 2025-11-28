@@ -4,7 +4,7 @@ from youtube_transcript_api.formatters import TextFormatter
 import re
 
 # FIX: Yahan double underscore () hona chahiye
-app = Flask(__name__)
+app = Flask(__ youtube transcript api__)
 
 # HTML Template (Aapka wala hi rakha hai)
 HTML = '''
@@ -96,8 +96,7 @@ def get_transcript(video_id):
             typ = "Auto" if t.is_generated else "Manual"
             return " ".join(texts).replace("  ", "\n"), f"{t.language} ({typ})"
 
-        except AttributeError as e
-             generated transcript (e)
+        except AttributeError:
             # Koshish 2: Purana Tarika (Agar 'list_transcripts' error de raha hai)
             # Ye code crash hone se bachayega
             print("Falling back to old method...")
@@ -145,6 +144,5 @@ def index():
     return render_template_string(HTML, transcript=transcript, language=language, video_id=video_id, error=error)
 
 # FIX: Yahan bhi double underscore () hona chahiye
-if __name__ == "__main__":
+if __youtube transcript api__ == "__youtube transcript api__":
     app.run(host="0.0.0.0", port=8080)
-
