@@ -1,108 +1,112 @@
-# app.py - पूरी फाइल (Python 3.10 के लिए बिल्कुल सही)
-
-from flask import Flask, request, jsonify
+from flask import Flask, request, render_template_string
 from youtube_transcript_api import YouTubeTranscriptApi
 import re
 
 app = Flask(__name__)
 
-# यूट्यूब video_id निकालने के लिए
-def extract_video_id(url):
-    patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
-        r'(?:embed\/)([0-9A-Za-z_-]{11})',
-        r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    return None
+# HTML Template (सुंदर वेबसाइट जैसी)
+HTML = '''
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube to Transcript (हिंदी + English)</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-align: center; padding: 50px; }
+        h1 { font-size: 3rem; margin-bottom: 10px; }
+        p { font-size: 1.3rem; }
+        input { padding: 15px; width: 70%; max-width: 600px; font-size: 1.1rem; border-radius: 10px; border: none; margin: 20px 0; }
+        button { padding: 15px 40px; font-size: 1.2rem; background: #ff4757; color: white; border: none; border-radius: 10px; cursor: pointer; }
+        button:hover { background: #ff3742; }
+        .result { margin-top: 40px; background: rgba(0,0,0,0.3); padding: 30px; border-radius: 15px; text-align: left; display: inline-block; width: 80%; max-width: 800px; }
+        textarea { width: 100%; height: 400px; background: #222; color: #0f0; padding: 20px; border-radius: 10px; font-size: 1.1rem; margin-top: 20px; }
+        .footer { margin-top: 50px; font-size: 0.9rem; opacity: 0.8; }
+    </style>
+</head>
+<body>
+    <h1>YouTube to Transcript</h1>
+    <p>कोई भी यूट्यूब वीडियो का लिंक डालो – हिंदी, इंग्लिश या कोई भी भाषा में ट्रांसक्रिप्ट मिलेगा</p>
+    
+    <form method="POST">
+        <input type="text" name="url" placeholder="https://youtu.be/..." required>
+        <br>
+        <button type="submit">ट्रांसक्रिप्ट निकालो</button>
+    </form>
 
-# सबसे अच्छा ट्रांसक्रिप्ट लाने का फंक्शन (Python 3.10 friendly)
-def get_best_transcript(video_id):
+    {% if transcript %}
+    <div class="result">
+        <h2>ट्रांसक्रिप्ट मिल गया!</h2>
+        <p><strong>भाषा:</strong> {{ language }}</p>
+        <p><strong>वीडियो ID:</strong> {{ video_id }}</p>
+        <textarea readonly>{{ transcript }}</textarea>
+        <p>Copy कर लो ↑</p>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="result" style="background: rgba(255,0,0,0.3);">
+        <h2>{{ error }}</h2>
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        Made with ❤ by Sushil Dahiya | Free Forever
+    </div>
+</body>
+</html>
+'''
+
+def extract_video_id(url):
+    regex = r"(?:v=|\/|embed\/|youtu\.be\/|\/v\/|\/e\/|watch\?v=)([0-9A-Za-z_-]{11})"
+    match = re.search(regex, url)
+    return match.group(1) if match else None
+
+def get_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-        # 1. पहले मैन्युअल हिंदी या इंग्लिश ट्रांसक्रिप्ट
-        try:
-            transcript = transcript_list.find_manually_created_transcript(['hi', 'en'])
-            lang = transcript.language
-            code = transcript.language_code
-            print("Manual transcript मिला:", lang, f"({code})")
-            return transcript.fetch(), f"{lang} ({code}) - Manual"
-        except:
-            pass
+        # Priority: Manual Hindi → Manual English → Auto Hindi → Auto English → Any
+        for lang in ['hi', 'en']:
+            try:
+                t = transcript_list.find_manually_created_transcript([lang])
+                texts = [item['text'] for item in t.fetch()]
+                return " ".join(texts).replace("  ", " , "\n"), f"{t.language} (Manual)"
+            except: pass
 
-        # 2. ऑटो-जेनरेटेड हिंदी
-        try:
-            transcript = transcript_list.find_generated_transcript(['hi'])
-            print("Auto-generated हिंदी ट्रांसक्रिप्ट मिला")
-            return transcript.fetch(), "Hindi - Auto-generated"
-        except:
-            pass
+        for lang in ['hi', 'en']:
+            try:
+                t = transcript_list.find_generated_transcript([lang])
+                texts = [item['text'] for item in t.fetch()]
+                return " ".join(texts).replace("  ", "\n"), f"{t.language} (Auto)"
+            except: pass
 
-        # 3. ऑटो-जेनरेटेड इंग्लिश
-        try:
-            transcript = transcript_list.find_generated_transcript(['en'])
-            print("Auto-generated इंग्लिश ट्रांसक्रिप्ट मिला")
-            return transcript.fetch(), "English - Auto-generated"
-        except:
-            pass
-
-        # 4. जो भी मिल जाए (फॉलबैक)
-        transcript = next(iter(transcript_list))
-        typ = "Auto-generated" if transcript.is_generated else "Manual"
-        print(f"फॉलबैक: {transcript.language} - {typ}")
-        return transcript.fetch(), f"{transcript.language} - {typ}"
+        t = next(iter(transcript_list))
+        texts = [item['text'] for item in t.fetch()]
+        typ = "Auto" if t.is_generated else "Manual"
+        return " ".join(texts).replace("  ", "\n"), f"{t.language} ({typ})"
 
     except Exception as e:
-        print("कोई ट्रांसक्रिप्ट नहीं मिला:", str(e))
         return None, str(e)
 
-# होम पेज
-@app.route('/')
-def home():
-    return '''
-    <h1>YouTube Transcript API (हिंदी + English)</h1>
-    <p>उदाहरण: <code>/transcript?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ</code></p>
-    <p>या शॉर्ट लिंक भी चलेगा: <code>https://youtu.be/dQw4w9WgXcQ</code></p>
-    '''
+@app.route("/", methods=["GET", "POST"])
+def index():
+    transcript = None
+    language = None
+    video_id = None
+    error = None
 
-# मुख्य API रूट
-@app.route('/transcript')
-def transcript():
-    url = request.args.get('url')
-    
-    if not url:
-        return jsonify({"error": "url पैरामीटर जरूरी है!"}), 400
+    if request.method == "POST":
+        url = request.form.get("url")
+        video_id = extract_video_id(url)
+        if not video_id:
+            error = "गलत यूट्यूब लिंक डाला है भाई"
+        else:
+            transcript, language = get_transcript(video_id)
+            if not transcript:
+                error = "इस वीडियो में ट्रांसक्रिप्ट नहीं है या प्राइवेट है।"
 
-    video_id = extract_video_id(url)
-    if not video_id:
-        return jsonify({"error": "वैलिड यूट्यूब लिंक नहीं है"}), 400
+    return render_template_string(HTML, transcript=transcript, language=language, video_id=video_id, error=error)
 
-    transcript_data, info = get_best_transcript(video_id)
-
-    if transcript_data is None:
-        return jsonify({
-            "video_id": video_id,
-            "error": info,
-            "message": "इस वीडियो में कोई सबटाइटल/ट्रांसक्रिप्ट उपलब्ध नहीं है"
-        }), 404
-
-    # पूरा टेक्स्ट बनाओ
-    full_text = " ".join([item['text'] for item in transcript_data])
-
-    return jsonify({
-        "video_id": video_id,
-        "language": info,
-        "total_segments": len(transcript_data),
-        "full_text": full_text,
-        "transcript": transcript_data
-    })
-
-# चलाओ
-if __name__ == '__main__':
-    app.run(debug=True)
-
-
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
