@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TranscriptIO - Sushil Dahiya</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* CSS Styles */
+        body {
+            background-color: #0f172a;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            flex-direction: column;
+        }
+        .container {
+            background-color: #1e293b;
+            width: 90%;
+            max-width: 600px;
+            padding: 30px;
+            border-radius: 16px;
+            text-align: center;
+            border: 1px solid #334155;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        /* Photo Style */
+        .profile-img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 2px solid #6366f1;
+            margin-bottom: 10px;
+        }
+
+        h1 { margin: 0 0 20px 0; color: #818cf8; }
+
+        /* Input Box */
+        input[type="text"] {
+            width: 90%;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #0f172a;
+            border: 2px solid #334155;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            outline: none;
+        }
+        input:focus { border-color: #6366f1; }
+
+        /* Button Style (No Reload) */
+        button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover { transform: scale(1.02); }
+        button:disabled { background: #475569; cursor: not-allowed; }
+
+        /* Result Area */
+        .result-area {
+            margin-top: 20px;
+            text-align: left;
+            background-color: #0f172a;
+            padding: 20px;
+            border-radius: 8px;
+            display: none; /* Initially Hidden */
+            white-space: pre-wrap;
+            color: #cbd5e1;
+            max-height: 400px;
+            overflow-y: auto;
+            border-left: 4px solid #6366f1;
+            line-height: 1.6;
+        }
+
+        .footer { margin-top: 30px; color: #64748b; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <img src="https://ui-avatars.com/api/?name=Sushil+Dahiya&background=6366f1&color=fff&size=128" class="profile-img">
+        <h1>TranscriptIO</h1>
+
+        <input type="text" id="urlInput" placeholder="Paste YouTube Link here..." autocomplete="off">
+
+        <button id="btn" type="button" onclick="startGeneration()">GENERATE TRANSCRIPT ⚡</button>
+
+        <p id="statusMsg" style="display:none; color: #fbbf24; margin-top: 15px;">
+            <i class="fas fa-spinner fa-spin"></i> Processing...
+        </p>
+
+        <div id="result" class="result-area"></div>
+    </div>
+
+    <div class="footer">Made by Sushil Dahiya</div>
+
+    <script>
+        // Main Function
+        async function startGeneration() {
+            // Elements ko select karna
+            const urlInput = document.getElementById('urlInput');
+            const resultDiv = document.getElementById('result');
+            const btn = document.getElementById('btn');
+            const statusMsg = document.getElementById('statusMsg');
+
+            const url = urlInput.value.trim();
+
+            // Validation
+            if (!url) {
+                alert("Please enter a YouTube URL!");
+                return;
+            }
+
+            // UI Reset (Loading State)
+            btn.disabled = true;
+            statusMsg.style.display = 'block';
+            resultDiv.style.display = 'none';
+            resultDiv.innerText = "";
+
+            try {
+                // Server ko data bhejna (API Call)
+                // 'encodeURIComponent' url ke special characters ko safe banata hai
+                const response = await fetch('/api/transcript?url=' + encodeURIComponent(url));
+                const data = await response.json();
+
+                // Loading hatana
+                statusMsg.style.display = 'none';
+                resultDiv.style.display = 'block';
+
+                if (data.error) {
+                    // Agar Error aaya
+                    resultDiv.innerText = "❌ Error: " + data.error;
+                    resultDiv.style.color = "#ef4444"; // Red Color
+                } else {
+                    // Agar Success hua
+                    resultDiv.innerText = data.transcript;
+                    resultDiv.style.color = "#cbd5e1"; // Normal Text Color
+                }
+
+            } catch (err) {
+                // Agar Internet ya Server issue ho
+                console.error(err);
+                statusMsg.style.display = 'none';
+                alert("Server Error! Check console for details.");
+            }
+
+            // Button wapas chalu karna
+            btn.disabled = false;
+        }
+    </script>
+</body>
+</html>
