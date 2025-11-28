@@ -1,93 +1,59 @@
-from flask import Flask, render_template, request, jsonify
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
-import re
-
-app = Flask(__name__)
-
-def extract_video_id(url):
-    """
-    YouTube URL se Video ID nikalne ka robust function.
-    Ab ye Shorts aur alag-alag formats ko behtar handle karega.
-    """
-    regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|)|youtu\.be\/)([a-zA-Z0-9_-]{11})"
-    match = re.search(regex, url)
-    if match:
-        return match.group(1)
-    return None
 
 def get_best_transcript(video_id):
     """
-    Smart function jo pehle English/Hindi dhundta hai,
-    Agar wo na mile to JO BHI transcript available ho use le leta hai.
+    Tries to get transcript in this order:
+    1. Hindi (manual)
+    2. English (manual)
+    3. Hindi (auto-generated)
+    4. English (auto-generated)
+    5. Any available transcript
     """
     try:
-        # Step 1: Available transcripts ki list nikalo
-        transcript_list_obj = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        # Step 2: Try to find English or Hindi
+        # This returns a TranscriptList object with all available transcripts
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+        # Priority 1 & 2: Manually created Hindi or English
         try:
-            transcript = transcript_list_obj.find_transcript(['en', 'hi'])
+            transcript = transcript_list.find_manually_created_transcript(['hi', 'en'])
+            print(f"Found manual transcript: {transcript.language} ({transcript.language_code})")
+            return transcript.fetch()
         except:
-            # Step 3: Fallback - Agar En/Hi nahi mila, to jo pehla available hai wo utha lo
-            # (Chahe wo Spanish ho, German ho, ya Auto-generated English variant ho)
-            transcript = next(iter(transcript_list_obj))
-            
-        # Step 4: Text fetch karke return karo
+            pass
+
+        # Priority 3: Auto-generated Hindi
+        try:
+            transcript = transcript_list.find_generated_transcript(['hi'])
+            print(f"Found auto-generated Hindi transcript")
+            return transcript.fetch()
+        except:
+            pass
+
+        # Priority 4: Auto-generated English
+        try:
+            transcript = transcript_list.find_generated_transcript(['en'])
+            print(f"Found auto-generated English transcript")
+            return transcript.fetch()
+        except:
+            pass
+
+        # Priority 5: Any first available transcript (manual or auto)
+        transcript = next(iter(transcript_list))
+        print(f"Fallback: Using {transcript.language} ({transcript.language_code}) - {'auto' if transcript.is_generated else 'manual')")
         return transcript.fetch()
-        
+
     except Exception as e:
-        # Agar transcript poori tarah disabled hai
-        print(f"Transcript Error: {e}")
+        print("No transcript available for this video:", e)
         return None
 
-# --- Route 1: Website ka Home Page ---
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    transcript_text = None
-    error_message = None
+# —————— HOW TO USE ——————
+video_id = "dQw4w9WgXcQ"   # Change this to your YouTube video ID
 
-    if request.method == 'POST':
-        video_url = request.form.get('url')
-        if video_url:
-            video_id = extract_video_id(video_url)
-            if video_id:
-                # Naya smart function use kar rahe hain
-                transcript_data = get_best_transcript(video_id)
-                
-                if transcript_data:
-                    formatter = TextFormatter()
-                    transcript_text = formatter.format_transcript(transcript_data)
-                else:
-                    error_message = "Error: Is video mein koi bhi transcript/caption available nahi hai."
-            else:
-                error_message = "Invalid YouTube URL."
-        else:
-            error_message = "Please enter a URL."
+transcript_data = get_best_transcript(video_id)
 
-    return render_template('index.html', transcript=transcript_text, error=error_message)
-
-# --- Route 2: API Request Handle karne ke liye ---
-@app.route('/api/transcript', methods=['GET'])
-def api_transcript():
-    video_url = request.args.get('url')
-    
-    if not video_url:
-        return jsonify({'error': 'URL is required'}), 400
-
-    video_id = extract_video_id(video_url)
-    if not video_id:
-        return jsonify({'error': 'Invalid YouTube URL'}), 400
-
-    # Naya smart function use kar rahe hain
-    transcript_data = get_best_transcript(video_id)
-
-    if transcript_data:
-        formatter = TextFormatter()
-        transcript_text = formatter.format_transcript(transcript_data)
-        return jsonify({'transcript': transcript_text})
-    else:
-        return jsonify({'error': 'Transcript not available for this video.'}), 404
-
-if __name__ == '__main__':
-    app.run(debug=True)
+if transcript_data:
+    print("\nTranscript:\n")
+    for line in transcript_data:
+        print(line['text'])
+else:
+    print("Could not retrieve any transcript.")
