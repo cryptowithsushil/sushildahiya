@@ -3,10 +3,13 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 import re
 
-# FIX: Yahan double underscore () hona chahiye
-app = Flask(__ youtube transcript api__)
+# FIX: Double underscore correct kiya hai (_name_)
+app = Flask(__name__)
 
-# HTML Template (Aapka wala hi rakha hai)
+# Aapki di hui API Key ko yahan Secure Key bana diya hai
+app.secret_key = "6929ca86c8b7375deae07c5c"
+
+# HTML Template
 HTML = '''
 <!DOCTYPE html>
 <html lang="hi">
@@ -98,7 +101,6 @@ def get_transcript(video_id):
 
         except AttributeError:
             # Koshish 2: Purana Tarika (Agar 'list_transcripts' error de raha hai)
-            # Ye code crash hone se bachayega
             print("Falling back to old method...")
             data = YouTubeTranscriptApi.get_transcript(video_id, languages=['hi', 'en'])
             
@@ -143,6 +145,6 @@ def index():
 
     return render_template_string(HTML, transcript=transcript, language=language, video_id=video_id, error=error)
 
-# FIX: Yahan bhi double underscore () hona chahiye
-if __youtube transcript api__ == "__youtube transcript api__":
+# FIX: Double underscore correct kiya hai (_name, __main_)
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
