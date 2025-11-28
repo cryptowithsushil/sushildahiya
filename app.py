@@ -1,68 +1,52 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, render_template, request
 from youtube_transcript_api import YouTubeTranscriptApi
-import traceback
-import os
+from youtube_transcript_api.formatters import TextFormatter
+import re
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return render_template('index.html')
+def extract_video_id(url):
+    """
+    YouTube URL se Video ID nikalne ka robust function (Regex based).
+    Ye normal videos, shorts, live streams, aur share links sabko handle karega.
+    """
+    # Regex pattern jo har tarah ke link se ID nikal leta hai
+    regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})"
+    match = re.search(regex, url)
+    if match:
+        return match.group(1)
+    return None
 
-@app.route('/api/transcript', methods=['GET'])
-def get_transcript_api():
-    try:
-        url = request.args.get('url')
-        if not url:
-            return jsonify({"error": "URL nahi mila"}), 400
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    transcript_text = None
+    error_message = None
 
-        # --- 1. Video ID Nikalna ---
-        video_id = None
-        if "youtu.be" in url:
-            video_id = url.split("youtu.be/")[1].split("?")[0]
-        elif "v=" in url:
-            video_id = url.split("v=")[1].split("&")[0]
-        elif "/shorts/" in url:
-            video_id = url.split("/shorts/")[1].split("?")[0]
-        else:
-            video_id = url
-
-        if not video_id:
-            return jsonify({"error": "Video ID detect nahi hui."}), 400
-
-        # --- 2. Cookies Check ---
-        cookie_file = "cookies.txt"
-        cookies_path = cookie_file if os.path.exists(cookie_file) else None
+    if request.method == 'POST':
+        video_url = request.form.get('url')
         
-        if not cookies_path:
-            print("⚠ Warning: cookies.txt nahi mili! Server check karein.")
+        if video_url:
+            video_id = extract_video_id(video_url)
+            
+            if video_id:
+                try:
+                    # Transcript fetch karna (English ya Hindi priority me)
+                    transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi'])
+                    
+                    # Formatter ka use karke clean text banana
+                    formatter = TextFormatter()
+                    transcript_text = formatter.format_transcript(transcript_list)
+                    
+                except Exception as e:
+                    # Agar subtitles off hain ya koi aur error hai
+                    print(f"System Error: {e}")
+                    error_message = "Error: Is video mein subtitles/captions available nahi hain ya restrict kiye gaye hain."
+            else:
+                error_message = "Invalid YouTube URL provided. Sahi link dalein."
+        else:
+            error_message = "Please enter a URL."
 
-        # --- 3. Transcript Fetching (Modern Way) ---
-        try:
-            # Step A: Saare Transcripts ki list nikalo (Cookies ke sath)
-            transcript_list_obj = YouTubeTranscriptApi.list_transcripts(video_id, cookies=cookies_path)
+    return render_template('index.html', transcript=transcript_text, error=error_message)
 
-            # Step B: Hamein Hindi chahiye, agar wo na mile to English
-            # Hum priority set kar rahe hain: Hindi > English India > English Global
-            transcript = transcript_list_obj.find_transcript(['hi', 'en-IN', 'en'])
-
-            # Step C: Ab data fetch karo
-            final_data = transcript.fetch()
-
-            # Step D: Text join karo
-            # (Render par ye Dictionary return karega, isliye item['text'] use kiya)
-            full_text = " ".join([item['text'] for item in final_data])
-
-            return jsonify({"transcript": full_text})
-
-        except Exception as yt_error:
-            # Agar koi bhi dikkat aayi (jaise video me transcript hi na ho)
-            print(f"YouTube API Error: {str(yt_error)}")
-            return jsonify({"error": f"YouTube Error: {str(yt_error)}"}), 500
-
-    except Exception as e:
-        print(traceback.format_exc())
-        return jsonify({"error": f"System Error: {str(e)}"}), 500
-
-if __name__ == '__main__':
+if _name_ == '__main__':
     app.run(debug=True)
