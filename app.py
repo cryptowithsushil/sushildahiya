@@ -8,8 +8,11 @@ app = Flask(__name__)
 def extract_video_id(url):
     """
     YouTube URL se Video ID nikalne ka robust function.
+    Ab ye Shorts aur alag-alag formats ko behtar handle karega.
     """
-    regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})"
+    # Updated Regex: Ye Shorts, Watch, Embed, aur youtu.be sabko cover karega
+    regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|)|youtu\.be\/)([a-zA-Z0-9_-]{11})"
+    
     match = re.search(regex, url)
     if match:
         return match.group(1)
@@ -40,7 +43,7 @@ def index():
 
     return render_template('index.html', transcript=transcript_text, error=error_message)
 
-# --- Route 2: API Request Handle karne ke liye (Jo error aa raha tha wo isse theek hoga) ---
+# --- Route 2: API Request Handle karne ke liye ---
 @app.route('/api/transcript', methods=['GET'])
 def api_transcript():
     video_url = request.args.get('url') # URL query parameter se lena
