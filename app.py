@@ -1,10 +1,12 @@
 from flask import Flask, request, render_template_string
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.formatters import TextFormatter
 import re
 
+# FIX: Yahan double underscore () hona chahiye
 app = Flask(__name__)
 
-# HTML Template (सुंदर वेबसाइट जैसी)
+# HTML Template (Aapka wala hi rakha hai)
 HTML = '''
 <!DOCTYPE html>
 <html lang="hi">
@@ -27,7 +29,7 @@ HTML = '''
 <body>
     <h1>YouTube to Transcript</h1>
     <p>कोई भी यूट्यूब वीडियो का लिंक डालो – हिंदी, इंग्लिश या कोई भी भाषा में ट्रांसक्रिप्ट मिलेगा</p>
-    
+     
     <form method="POST">
         <input type="text" name="url" placeholder="https://youtu.be/..." required>
         <br>
@@ -58,42 +60,54 @@ HTML = '''
 '''
 
 def extract_video_id(url):
-    # FIX: Added check for None or non-string input to prevent TypeError in re.search
     if not url or not isinstance(url, str):
         return None
-    
-    regex = r"(?:v=|\/|embed\/|youtu\.be\/|\/v\/|\/e\/|watch\?v=)([0-9A-Za-z_-]{11})"
+    # Improved Regex for better matching
+    regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|)|youtu\.be\/)([a-zA-Z0-9_-]{11})"
     match = re.search(regex, url)
     return match.group(1) if match else None
 
 def get_transcript(video_id):
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # Koshish 1: Naya Tarika (Advanced - list_transcripts)
+        # Ye tabhi chalega agar library updated hai
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-        # Priority: Manual Hindi → Manual English → Auto Hindi → Auto English → Any
-        for lang in ['hi', 'en']:
-            try:
-                t = transcript_list.find_manually_created_transcript([lang])
-                texts = [item['text'] for item in t.fetch()]
-                # FIX: Removed " , " for cleaner formatting
-                return " ".join(texts).replace("  ", "\n"), f"{t.language} (Manual)"
-            except: pass
+            # Priority: Manual Hindi -> Manual English
+            for lang in ['hi', 'en']:
+                try:
+                    t = transcript_list.find_manually_created_transcript([lang])
+                    texts = [item['text'] for item in t.fetch()]
+                    return " ".join(texts).replace("  ", "\n"), f"{t.language} (Manual)"
+                except: pass
 
-        for lang in ['hi', 'en']:
-            try:
-                t = transcript_list.find_generated_transcript([lang])
-                texts = [item['text'] for item in t.fetch()]
-                return " ".join(texts).replace("  ", "\n"), f"{t.language} (Auto)"
-            except: pass
+            # Priority: Auto Hindi -> Auto English
+            for lang in ['hi', 'en']:
+                try:
+                    t = transcript_list.find_generated_transcript([lang])
+                    texts = [item['text'] for item in t.fetch()]
+                    return " ".join(texts).replace("  ", "\n"), f"{t.language} (Auto)"
+                except: pass
 
-        # Fallback to the first available transcript
-        t = next(iter(transcript_list))
-        texts = [item['text'] for item in t.fetch()]
-        typ = "Auto" if t.is_generated else "Manual"
-        return " ".join(texts).replace("  ", "\n"), f"{t.language} ({typ})"
+            # Fallback: First available
+            t = next(iter(transcript_list))
+            texts = [item['text'] for item in t.fetch()]
+            typ = "Auto" if t.is_generated else "Manual"
+            return " ".join(texts).replace("  ", "\n"), f"{t.language} ({typ})"
+
+        except AttributeError:
+            # Koshish 2: Purana Tarika (Agar 'list_transcripts' error de raha hai)
+            # Ye code crash hone se bachayega
+            print("Falling back to old method...")
+            data = YouTubeTranscriptApi.get_transcript(video_id, languages=['hi', 'en'])
+            
+            # Simple Text formatting
+            formatter = TextFormatter()
+            formatted_text = formatter.format_transcript(data)
+            return formatted_text, "Hindi/English (Old Lib)"
 
     except Exception as e:
-        # Return None for transcript and the error message for handling in the route
         return None, str(e)
 
 @app.route("/", methods=["GET", "POST"])
@@ -106,7 +120,6 @@ def index():
     if request.method == "POST":
         url = request.form.get("url")
         
-        # FIX: Added check for empty URL submission
         if not url:
             error = "कृपया यूट्यूब लिंक डालें।"
         else:
@@ -119,7 +132,6 @@ def index():
                 if transcript:
                     language = error_or_language
                 else:
-                    # FIX: Improved error handling logic to provide more specific user-friendly messages
                     if "No transcripts were found" in error_or_language:
                         error = "इस वीडियो में ट्रांसक्रिप्ट नहीं है।"
                     elif "is a private video" in error_or_language:
@@ -127,10 +139,10 @@ def index():
                     elif "disabled" in error_or_language:
                         error = "इस वीडियो के लिए ट्रांसक्रिप्ट अक्षम (disabled) है।"
                     else:
-                        # Fallback for other errors, providing the original error message for debugging
-                        error = f"ट्रांसक्रिप्ट प्राप्त करने में एक अज्ञात त्रुटि हुई: {error_or_language}"
+                        error = f"Error: {error_or_language}"
 
     return render_template_string(HTML, transcript=transcript, language=language, video_id=video_id, error=error)
 
+# FIX: Yahan bhi double underscore () hona chahiye
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
