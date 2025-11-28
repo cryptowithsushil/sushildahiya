@@ -4,8 +4,6 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from .proxies import ProxyConfig
-
 from ._transcripts import TranscriptListFetcher, FetchedTranscript, TranscriptList
 
 
@@ -125,3 +123,4 @@ class YouTubeTranscriptApi:
             Make sure that this is the actual ID, NOT the full URL to the video!
         """
         return self._fetcher.fetch(video_id)
+
