@@ -3,7 +3,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 import re
 
-app = Flask(__name__)
+app = Flask(___name___)
 
 def extract_video_id(url):
     """
@@ -48,5 +48,6 @@ def index():
 
     return render_template('index.html', transcript=transcript_text, error=error_message)
 
-if _name_ == '__main__':
+if __name__ == '___main___':
     app.run(debug=True)
+
